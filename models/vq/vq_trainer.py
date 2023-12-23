@@ -10,7 +10,7 @@ import torch.optim as optim
 import time
 import numpy as np
 from collections import OrderedDict, defaultdict
-from utils.eval_t2m import evaluation_vqvae, evaluation_res_conv
+from utils.eval_t2m import evaluation_vqvae
 from utils.utils import print_current_loss
 
 import os
@@ -110,9 +110,10 @@ class RVQTokenizerTrainer:
             best_top2=0, best_top3=0, best_matching=100,
             eval_wrapper=eval_wrapper, save=False)
 
-        while epoch < self.opt.max_epoch:
+        from tqdm import tqdm
+        for epoch in tqdm(range(self.opt.max_epoch)):
             self.vq_model.train()
-            for i, batch_data in enumerate(train_loader):
+            for i, batch_data in enumerate(tqdm(train_loader)):
                 it += 1
                 if it < self.opt.warm_up_iter:
                     current_lr = self.update_lr_warm_up(it, self.opt.warm_up_iter, self.opt.lr)
@@ -140,7 +141,7 @@ class RVQTokenizerTrainer:
                         self.logger.add_scalar('Train/%s'%tag, value / self.opt.log_every, it)
                         mean_loss[tag] = value / self.opt.log_every
                     logs = defaultdict(def_value, OrderedDict())
-                    print_current_loss(start_time, it, total_iters, mean_loss, epoch=epoch, inner_iter=i)
+                    # print_current_loss(start_time, it, total_iters, mean_loss, epoch=epoch, inner_iter=i)
 
                 if it % self.opt.save_latest == 0:
                     self.save(pjoin(self.opt.model_dir, 'latest.tar'), epoch, it)
@@ -202,7 +203,7 @@ class RVQTokenizerTrainer:
                 # np.save(pjoin(self.opt.eval_dir, 'E%04d.npy' % (epoch)), data)
                 save_dir = pjoin(self.opt.eval_dir, 'E%04d' % (epoch))
                 os.makedirs(save_dir, exist_ok=True)
-                plot_eval(data, save_dir)
+                # plot_eval(data, save_dir)
                 # if plot_eval is not None:
                 #     save_dir = pjoin(self.opt.eval_dir, 'E%04d' % (epoch))
                 #     os.makedirs(save_dir, exist_ok=True)

@@ -21,7 +21,7 @@ from utils.motion_process import recover_from_ric
 
 @torch.no_grad()
 def evaluation_vqvae(out_dir, val_loader, net, writer, ep, best_fid, best_div, best_top1,
-                     best_top2, best_top3, best_matching, eval_wrapper, save=True, draw=True):
+                     best_top2, best_top3, best_matching, eval_wrapper, save=False, draw=False):
     net.eval()
 
     motion_annotation_list = []
