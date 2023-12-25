@@ -156,12 +156,20 @@ class LFQ(Module):
             codes = rearrange(codes, 'b ... d -> b d ...')
 
         return codes
+    
+    def quantize(self, x, *args, **kwargs):
+        x = x.permute(0,2,1).float()
+        return self(x, return_indices=True), 'dummy'
+    
+    def dequantize(self, x):
+        return self.indices_to_codes(x)
 
     def forward(
         self,
         x,
         inv_temperature = 100.,
-        return_loss_breakdown = False
+        return_loss_breakdown = False,
+        return_indices = False
     ):
         """
         einstein notation
@@ -206,6 +214,8 @@ class LFQ(Module):
         # self.mask is the base number of each bit
         indices = reduce((x > 0).int() * self.mask.int(), 'b n c d -> b n c', 'sum')
 
+        if return_indices:
+            return indices
         # entropy aux loss
 
         if self.training:
