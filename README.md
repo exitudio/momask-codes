@@ -1,5 +1,5 @@
 # MoMask: Generative Masked Modeling of 3D Human Motions
-## [[Project Page]](https://ericguo5513.github.io/momask) [[Paper]](https://arxiv.org/abs/2312.00063) [[Demo]](https://huggingface.co/spaces/MeYourHint/MoMask)
+## [[Project Page]](https://ericguo5513.github.io/momask) [[Paper]](https://arxiv.org/abs/2312.00063) [[Huggingface Demo]](https://huggingface.co/spaces/MeYourHint/MoMask)
 ![teaser_image](https://ericguo5513.github.io/momask/static/images/teaser.png)
 
 If you find our code or paper helpful, please consider citing:
@@ -15,6 +15,8 @@ If you find our code or paper helpful, please consider citing:
 ```
 
 ## :postbox: News
+📢 **2023-12-27** --- Release WebUI demo. Quickly try our work on [🤗HuggingFace](https://huggingface.co/spaces/MeYourHint/MoMask).
+
 📢 **2023-12-19** --- Release scripts for temporal inpainting.
 
 📢 **2023-12-15** --- Release codes and models for momask. Including training/eval/generation scripts.
@@ -34,6 +36,14 @@ pip install git+https://github.com/openai/CLIP.git
 ```
 We test our code on Python 3.7.13 and PyTorch 1.7.1
 
+#### Alternative: Pip Installation
+<details>
+We provide an alternative pip installation in case you encounter difficulties setting up the conda environment.
+
+```
+pip install -r requirements.txt
+```
+</details>
 
 ### 2. Models and Dependencies
 
