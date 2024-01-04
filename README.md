@@ -1,5 +1,5 @@
 # MoMask: Generative Masked Modeling of 3D Human Motions
-## [[Project Page]](https://ericguo5513.github.io/momask) [[Paper]](https://arxiv.org/abs/2312.00063) [[Huggingface Demo]](https://huggingface.co/spaces/MeYourHint/MoMask)
+### [[Project Page]](https://ericguo5513.github.io/momask) [[Paper]](https://arxiv.org/abs/2312.00063) [[Huggingface Demo]](https://huggingface.co/spaces/MeYourHint/MoMask) [[Colab Demo]](https://github.com/camenduru/MoMask-colab)
 ![teaser_image](https://ericguo5513.github.io/momask/static/images/teaser.png)
 
 If you find our code or paper helpful, please consider citing:
@@ -15,7 +15,11 @@ If you find our code or paper helpful, please consider citing:
 ```
 
 ## :postbox: News
-📢 **2023-12-27** --- Release WebUI demo. Quickly try our work on [🤗HuggingFace](https://huggingface.co/spaces/MeYourHint/MoMask).
+📢 **2023-12-30** --- For easy WebUI BVH visulization, you could try this website [bvh2vrma](https://vrm-c.github.io/bvh2vrma/) from this [github](https://github.com/vrm-c/bvh2vrma?tab=readme-ov-file).
+
+📢 **2023-12-29** --- Thanks to Camenduru for supporting the [🤗Colab](https://github.com/camenduru/MoMask-colab) demo.
+
+📢 **2023-12-27** --- Release WebUI demo. Try now on [🤗HuggingFace](https://huggingface.co/spaces/MeYourHint/MoMask)!
 
 📢 **2023-12-19** --- Release scripts for temporal inpainting.
 
@@ -43,6 +47,8 @@ We provide an alternative pip installation in case you encounter difficulties se
 ```
 pip install -r requirements.txt
 ```
+We test this installation on Python 3.10
+
 </details>
 
 ### 2. Models and Dependencies
@@ -62,7 +68,7 @@ bash prepare/download_glove.sh
 #### Troubleshooting
 To address the download error related to gdown: "Cannot retrieve the public link of the file. You may need to change the permission to 'Anyone with the link', or have had many accesses". A potential solution is to run `pip install --upgrade --no-cache-dir gdown`, as suggested on https://github.com/wkentaro/gdown/issues/43. This should help resolve the issue.
 
-#### (Optional) Download Mannually
+#### (Optional) Download Manually
 Visit [[Google Drive]](https://drive.google.com/drive/folders/1b3GnAbERH8jAoO5mdWgZhyxHB73n23sK?usp=drive_link) to download the models and evaluators mannually.
 
 ### 3. Get Data
@@ -158,8 +164,9 @@ Note: Presently, the source motion must adhere to the format of a HumanML3D dim-
 **Note**: You have to train RVQ **BEFORE** training masked/residual transformers. The latter two can be trained simultaneously.
 
 ### Train RVQ
+You may also need to download evaluation models to run the scripts.
 ```
-python train_vq.py --name rvq_name --gpu_id 1 --dataset_name t2m --batch_size 512 --num_quantizers 6  --max_epoch 500 --quantize_drop_prob 0.2
+python train_vq.py --name rvq_name --gpu_id 1 --dataset_name t2m --batch_size 256 --num_quantizers 6  --max_epoch 50 --quantize_drop_prob 0.2
 ```
 
 ### Train Masked Transformer
