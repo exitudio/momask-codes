@@ -37,13 +37,9 @@ if __name__ == "__main__":
     opt.device = torch.device("cpu" if opt.gpu_id == -1 else "cuda:" + str(opt.gpu_id))
     print(f"Using Device: {opt.device}")
 
-    date = datetime.datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
-    opt.name = f'{date}_{opt.name}'
-    opt.save_root = pjoin(opt.checkpoints_dir, opt.dataset_name, opt.name)
     opt.model_dir = pjoin(opt.save_root, 'model')
     opt.meta_dir = pjoin(opt.save_root, 'meta')
     opt.eval_dir = pjoin(opt.save_root, 'animation')
-    opt.log_dir = pjoin('./log/vq/', opt.dataset_name, opt.name)
     from exit.utils import init_save_folder
     init_save_folder(opt.save_root)
 
@@ -114,6 +110,9 @@ if __name__ == "__main__":
 
     train_loader = DataLoader(train_dataset, batch_size=opt.batch_size, drop_last=True, num_workers=4,
                               shuffle=True, pin_memory=True)
+    net.moment = {'mean': torch.from_numpy(train_loader.dataset.mean).cuda().float(), 
+                'std': torch.from_numpy(train_loader.dataset.std).cuda().float()}
+    
     val_loader = DataLoader(val_dataset, batch_size=opt.batch_size, drop_last=True, num_workers=4,
                             shuffle=True, pin_memory=True)
     eval_val_loader, _ = get_dataset_motion_loader(dataset_opt_path, 32, 'test', device=opt.device)

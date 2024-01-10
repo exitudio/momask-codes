@@ -1,22 +1,16 @@
 #!/bin/sh
 
 # cd /home/epinyoan/git/momask-codes
-# screen -S temp /home/epinyoan/git/momask-codes/experiments/train_vq.sh
+# screen -S temp /home/epinyoan/git/momask-codes/experiments/eval_vq.sh
 
 . ~/miniconda3/etc/profile.d/conda.sh
 cd /home/epinyoan/git/momask-codes
 conda activate momask
-name='1_uplow'
-python train_vq.py \
-    --name ${name} \
+python eval_t2m_vq.py \
     --gpu_id 0 \
-    --gamma 0.05 \
-    --lr 2e-4 \
+    --name 2024-01-08-15-24-24_momask_rerun_lr2e-4_bestFID_resetEvryIter \
     --dataset_name t2m \
-    --batch_size 256 \
-    --num_quantizers 6  \
-    --max_epoch 50 \
-    --quantize_dropout_prob 0.2
+    --ext rvq_nq6
 
 sleep 500
 # --commit 0.01 \

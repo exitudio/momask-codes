@@ -147,7 +147,7 @@ class RVQTokenizerTrainer:
                     self.save(pjoin(self.opt.model_dir, 'latest.tar'), epoch, it)
 
             self.save(pjoin(self.opt.model_dir, 'latest.tar'), epoch, it)
-            self.logger.add_scalar('Train/codebook_usage', self.vq_model.get_codebook_usage(val_loader), epoch)
+            # self.logger.add_scalar('Train/codebook_usage', self.vq_model.get_codebook_usage(val_loader), epoch)
 
             epoch += 1
             # if epoch % self.opt.save_every_e == 0:

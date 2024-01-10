@@ -1,6 +1,8 @@
 import argparse
 import os
 import torch
+import datetime
+from os.path import join as pjoin
 
 def arg_parse(is_train=False):
     parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
@@ -38,7 +40,7 @@ def arg_parse(is_train=False):
                         help='dataset directory')
     parser.add_argument('--vq_norm', type=str, default=None, help='dataset directory')
 
-    parser.add_argument('--num_quantizers', type=int, default=3, help='num_quantizers')
+    parser.add_argument('--num_quantizers', type=int, default=6, help='num_quantizers')
     parser.add_argument('--shared_codebook', action="store_true")
     parser.add_argument('--quantize_dropout_prob', type=float, default=0.2, help='quantize_dropout_prob')
     # parser.add_argument('--use_vq_prob', type=float, default=0.8, help='quantize_dropout_prob')
@@ -49,7 +51,7 @@ def arg_parse(is_train=False):
     ## other
     parser.add_argument('--name', type=str, default="test", help='Name of this trial')
     parser.add_argument('--is_continue', action="store_true", help='Name of this trial')
-    parser.add_argument('--checkpoints_dir', type=str, default='./checkpoints', help='models are saved here')
+    parser.add_argument('--checkpoints_dir', type=str, default='./log/vq', help='models are saved here')
     parser.add_argument('--log_every', default=10, type=int, help='iter log frequency')
     parser.add_argument('--save_latest', default=500, type=int, help='iter save latest model frequency')
     parser.add_argument('--save_every_e', default=2, type=int, help='save model every n epoch')
@@ -67,6 +69,11 @@ def arg_parse(is_train=False):
 
     opt = parser.parse_args()
     torch.cuda.set_device(opt.gpu_id)
+
+    date = datetime.datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
+    opt.name = f'{date}_{opt.name}'
+    opt.log_dir = pjoin('./log/vq/', opt.dataset_name, opt.name)
+    opt.save_root = opt.log_dir
 
     args = vars(opt)
 
