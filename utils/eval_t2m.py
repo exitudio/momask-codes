@@ -448,13 +448,20 @@ def evaluation_mask_transformer(out_dir, val_loader, trans, vq_model, writer, ep
 
         # (b, seqlen)
         mids = trans.generate(clip_text, m_length//4, time_steps, cond_scale, temperature=1)
+        # for quick fix bug of old run that didn't predict end token
+        # q = (mids == trans.end_id)
+        # mids[q] = 0
+        # pred_len = m_length
+        #############################
+        mids, pred_len = trans.pad_when_end(mids)
+        pred_len = pred_len.clamp(1, 49) * 4
 
         # motion_codes = motion_codes.permute(0, 2, 1)
         mids.unsqueeze_(-1)
         pred_motions = vq_model.forward_decoder(mids)
 
         et_pred, em_pred = eval_wrapper.get_co_embeddings(word_embeddings, pos_one_hots, sent_len, pred_motions.clone(),
-                                                          m_length)
+                                                          pred_len)
 
         pose = pose.cuda().float()
 
@@ -919,6 +926,7 @@ def evaluation_mask_transformer_test_plus_res(val_loader, vq_model, res_model, t
         num_mm_batch = 0
     else:
         num_mm_batch = 3
+    is_res = True
 
     for i, batch in enumerate(val_loader):
         word_embeddings, pos_one_hots, clip_text, sent_len, pose, m_length, token = batch
@@ -935,10 +943,16 @@ def evaluation_mask_transformer_test_plus_res(val_loader, vq_model, res_model, t
                 mids = trans.generate(clip_text, m_length // 4, time_steps, cond_scale,
                                       temperature=temperature, topk_filter_thres=topkr,
                                       gsample=gsample, force_mask=force_mask)
-
+                q = mids == trans.end_id
+                mids[q] = 0
+                # mids, pred_len = trans.pad_when_end(mids)
+                # pred_len = pred_len.clamp(1, 49) * 4
                 # motion_codes = motion_codes.permute(0, 2, 1)
-                # mids.unsqueeze_(-1)
-                pred_ids = res_model.generate(mids, clip_text, m_length // 4, temperature=1, cond_scale=res_cond_scale)
+                if is_res:
+                    pred_ids = res_model.generate(mids, clip_text, m_length // 4, temperature=1, cond_scale=res_cond_scale)
+                else:
+                    pred_ids =  mids.unsqueeze_(-1)
+
                 # pred_codes = trans(code_indices[..., 0], clip_text, m_length//4, force_mask=force_mask)
                 # pred_ids = torch.where(pred_ids==-1, 0, pred_ids)
 
@@ -957,10 +971,15 @@ def evaluation_mask_transformer_test_plus_res(val_loader, vq_model, res_model, t
             mids = trans.generate(clip_text, m_length // 4, time_steps, cond_scale,
                                   temperature=temperature, topk_filter_thres=topkr,
                                   force_mask=force_mask)
-
+            q = mids == trans.end_id
+            mids[q] = 0
+            # mids, pred_len = trans.pad_when_end(mids)
+            # pred_len = pred_len.clamp(1, 49) * 4
             # motion_codes = motion_codes.permute(0, 2, 1)
-            # mids.unsqueeze_(-1)
-            pred_ids = res_model.generate(mids, clip_text, m_length // 4, temperature=1, cond_scale=res_cond_scale)
+            if is_res:
+                pred_ids = res_model.generate(mids, clip_text, m_length // 4, temperature=1, cond_scale=res_cond_scale)
+            else:
+                pred_ids =  mids.unsqueeze_(-1)
             # pred_codes = trans(code_indices[..., 0], clip_text, m_length//4, force_mask=force_mask)
             # pred_ids = torch.where(pred_ids == -1, 0, pred_ids)
 

@@ -14,7 +14,7 @@ class BaseOptions():
 
         self.parser.add_argument("--gpu_id", type=int, default=-1, help='GPU id')
         self.parser.add_argument('--dataset_name', type=str, default='t2m', help='Dataset Name, {t2m} for humanml3d, {kit} for kit-ml')
-        self.parser.add_argument('--checkpoints_dir', type=str, default='./checkpoints', help='models are saved here.')
+        self.parser.add_argument('--checkpoints_dir', type=str, default='./log/t2m', help='models are saved here.')
 
         self.parser.add_argument('--latent_dim', type=int, default=384, help='Dimension of transformer latent.')
         self.parser.add_argument('--n_heads', type=int, default=6, help='Number of heads.')
@@ -29,11 +29,19 @@ class BaseOptions():
 
         self.initialized = True
 
-    def parse(self):
+    def parse(self, is_mock=False, is_eval=False):
         if not self.initialized:
             self.initialize()
 
-        self.opt = self.parser.parse_args()
+        if is_mock:
+            self.opt = self.parser.parse_args(args=[] if is_mock else None)
+        else:
+            self.opt = self.parser.parse_args()
+        
+        if not is_eval:
+            import datetime
+            date = datetime.datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
+            self.opt.name = f'{date}_{self.opt.name}'
 
         self.opt.is_train = self.is_train
 
@@ -47,7 +55,7 @@ class BaseOptions():
         for k, v in sorted(args.items()):
             print('%s: %s' % (str(k), str(v)))
         print('-------------- End ----------------')
-        if self.is_train:
+        if self.is_train and not is_mock:
             # save to the disk
             expr_dir = os.path.join(self.opt.checkpoints_dir, self.opt.dataset_name, self.opt.name)
             if not os.path.exists(expr_dir):

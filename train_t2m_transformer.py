@@ -31,10 +31,10 @@ def plot_t2m(data, save_dir, captions, m_lengths):
         joint = recover_from_ric(torch.from_numpy(joint_data).float(), opt.joints_num).numpy()
         save_path = pjoin(save_dir, '%02d.mp4'%i)
         # print(joint.shape)
-        plot_3d_motion(save_path, kinematic_chain, joint, title=caption, fps=20)
+        # plot_3d_motion(save_path, kinematic_chain, joint, title=caption, fps=20)
 
 def load_vq_model():
-    opt_path = pjoin(opt.checkpoints_dir, opt.dataset_name, opt.vq_name, 'opt.txt')
+    opt_path = pjoin('./log/vq', opt.dataset_name, opt.vq_name, 'opt.txt')
     vq_opt = get_opt(opt_path, opt.device)
     vq_model = RVQVAE(vq_opt,
                 dim_pose,
@@ -64,6 +64,8 @@ if __name__ == '__main__':
     torch.autograd.set_detect_anomaly(True)
 
     opt.save_root = pjoin(opt.checkpoints_dir, opt.dataset_name, opt.name)
+    from exit.utils import init_save_folder
+    init_save_folder(opt.save_root)
     opt.model_dir = pjoin(opt.save_root, 'model')
     # opt.meta_dir = pjoin(opt.save_root, 'meta')
     opt.eval_dir = pjoin(opt.save_root, 'animation')
@@ -131,8 +133,8 @@ if __name__ == '__main__':
 
     print('Total parameters of all models: {:.2f}M'.format(all_params / 1000_000))
 
-    mean = np.load(pjoin(opt.checkpoints_dir, opt.dataset_name, opt.vq_name, 'meta', 'mean.npy'))
-    std = np.load(pjoin(opt.checkpoints_dir, opt.dataset_name, opt.vq_name, 'meta', 'std.npy'))
+    mean = np.load(pjoin('./log/vq', opt.dataset_name, opt.vq_name, 'meta', 'mean.npy'))
+    std = np.load(pjoin('./log/vq', opt.dataset_name, opt.vq_name, 'meta', 'std.npy'))
 
     train_split_file = pjoin(opt.data_root, 'train.txt')
     val_split_file = pjoin(opt.data_root, 'val.txt')

@@ -87,7 +87,7 @@ def load_res_model(res_opt):
 
 if __name__ == '__main__':
     parser = EvalT2MOptions()
-    opt = parser.parse()
+    opt = parser.parse(is_eval=True)
     fixseed(opt.seed)
 
     opt.device = torch.device("cpu" if opt.gpu_id == -1 else "cuda:" + str(opt.gpu_id))
@@ -109,7 +109,7 @@ if __name__ == '__main__':
     model_opt = get_opt(model_opt_path, device=opt.device)
     clip_version = 'ViT-B/32'
 
-    vq_opt_path = pjoin(opt.checkpoints_dir, opt.dataset_name, model_opt.vq_name, 'opt.txt')
+    vq_opt_path = pjoin('./log/vq', opt.dataset_name, model_opt.vq_name, 'opt.txt')
     vq_opt = get_opt(vq_opt_path, device=opt.device)
     vq_model, vq_opt = load_vq_model(vq_opt)
 
@@ -117,7 +117,7 @@ if __name__ == '__main__':
     model_opt.num_quantizers = vq_opt.num_quantizers
     model_opt.code_dim = vq_opt.code_dim
 
-    res_opt_path = pjoin(opt.checkpoints_dir, opt.dataset_name, opt.res_name, 'opt.txt')
+    res_opt_path = pjoin('checkpoints', opt.dataset_name, opt.res_name, 'opt.txt')
     res_opt = get_opt(res_opt_path, device=opt.device)
     res_model = load_res_model(res_opt)
 

@@ -6,7 +6,7 @@
 . ~/miniconda3/etc/profile.d/conda.sh
 cd /home/epinyoan/git/momask-codes
 conda activate momask
-name='1_uplow'
+name='1_uplow_resetEvery_fullEmb_q1024'
 python train_vq.py \
     --name ${name} \
     --gpu_id 0 \

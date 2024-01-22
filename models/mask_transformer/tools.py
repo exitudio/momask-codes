@@ -130,7 +130,7 @@ def q_schedule(bs, low, high, device):
     return torch.round(schedule * (high - low - 1)).long() + low
 
 def cal_performance(pred, labels, ignore_index=None, smoothing=0., tk=1):
-    loss = cal_loss(pred, labels, ignore_index, smoothing=smoothing)
+    loss = '' #cal_loss(pred, labels, ignore_index, smoothing=smoothing)
     # pred_id = torch.argmax(pred, dim=1)
     # mask = labels.ne(ignore_index)
     # n_correct = pred_id.eq(labels).masked_select(mask)

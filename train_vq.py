@@ -27,7 +27,7 @@ def plot_t2m(data, save_dir):
         joint_data = data[i]
         joint = recover_from_ric(torch.from_numpy(joint_data).float(), opt.joints_num).numpy()
         save_path = pjoin(save_dir, '%02d.mp4' % (i))
-        plot_3d_motion(save_path, kinematic_chain, joint, title="None", fps=fps, radius=radius)
+        # plot_3d_motion(save_path, kinematic_chain, joint, title="None", fps=fps, radius=radius)
 
 
 if __name__ == "__main__":
