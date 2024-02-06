@@ -28,6 +28,7 @@ class TrainT2MOptions(BaseOptions):
         self.parser.add_argument('--eval_every_e', type=int, default=10, help='Frequency of animating eval results, (epoch)')
         self.parser.add_argument('--save_latest', type=int, default=500, help='Frequency of saving checkpoint, (iteration)')
 
+        self.parser.add_argument('--trans', type=str, default='official', help='Transfomer Implementation')
 
         self.is_train = True
 

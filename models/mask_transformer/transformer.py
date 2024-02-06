@@ -13,6 +13,7 @@ from copy import deepcopy
 from functools import partial
 from models.mask_transformer.tools import *
 from torch.distributions.categorical import Categorical
+from models.mask_transformer.transformer_block import TransformerEncoderLayer, TransformerDecoderLayer, TransformerEncoder
 
 class InputProcess(nn.Module):
     def __init__(self, input_feats, latent_dim):
@@ -108,15 +109,23 @@ class MaskTransformer(nn.Module):
         self.input_process = InputProcess(self.code_dim, self.latent_dim)
         self.position_enc = PositionalEncoding(self.latent_dim, self.dropout)
 
-        seqTransEncoderLayer = nn.TransformerEncoderLayer(d_model=self.latent_dim,
-                                                          nhead=num_heads,
-                                                          dim_feedforward=ff_size,
-                                                          dropout=dropout,
-                                                          activation='gelu')
+        if self.opt.trans == 'official':
+            seqTransEncoderLayer = nn.TransformerEncoderLayer(d_model=self.latent_dim,
+                                                            nhead=num_heads,
+                                                            dim_feedforward=ff_size,
+                                                            dropout=dropout,
+                                                            activation='gelu')
 
-        self.seqTransEncoder = nn.TransformerEncoder(seqTransEncoderLayer,
-                                                     num_layers=num_layers)
-
+            self.seqTransEncoder = nn.TransformerEncoder(seqTransEncoderLayer,
+                                                        num_layers=num_layers)
+        elif self.opt.trans == 't2mgpt':
+            self.seqTransEncoder = TransformerEncoder(nn.Sequential(*[TransformerEncoderLayer(embed_dim=self.latent_dim, 
+                                            n_head=num_heads, 
+                                            drop_out_rate=dropout, 
+                                            dim_feedforward=ff_size) for _ in range(num_layers)]))
+        else:
+            raise Exception('Type of opt.trans '+self.opt.trans+' is not supported')
+        
         self.encode_action = partial(F.one_hot, num_classes=self.num_actions)
 
         # if self.cond_mode != 'no_cond':
@@ -134,6 +143,7 @@ class MaskTransformer(nn.Module):
         self.end_id = opt.num_tokens
         self.pad_id = opt.num_tokens + 1
         self.mask_id = opt.num_tokens + 2
+        self.num_heads = num_heads
 
         self.output_process = OutputProcess_Bert(out_feats=opt.num_tokens + 1, latent_dim=latent_dim)
 
@@ -208,7 +218,7 @@ class MaskTransformer(nn.Module):
         else:
             return cond
 
-    def trans_forward(self, motion_ids, cond, padding_mask, force_mask=False):
+    def trans_forward(self, motion_ids, cond, padding_mask, force_mask=False, cond_idx=None):
         '''
         :param motion_ids: (b, seqlen)
         :padding_mask: (b, seqlen), all pad positions are TRUE else FALSE
@@ -237,9 +247,31 @@ class MaskTransformer(nn.Module):
 
         # print(padding_mask.shape, xseq.shape)
 
-        block_size = xseq.shape[0]
-        src_mask = torch.tril(torch.ones(block_size, block_size)).to(xseq.device)
-        output = self.seqTransEncoder(xseq, mask =src_mask<1, src_key_padding_mask=padding_mask) #(seqlen, b, e)
+        ################################################################
+        block_size, b = xseq.shape[:2]
+        attn = torch.tril(torch.ones(block_size, block_size)).to(xseq.device).bool()
+        attn = repeat(attn, 'T1 T2 -> b T1 T2', b=b)
+
+        if cond_idx is not None:
+            cond_pos = cond_idx != self.pad_id
+            cond_pos = torch.cat([torch.zeros_like(cond_pos[:, 0:1]), cond_pos], dim=1) #(b, seqlen+1)
+            
+            cond_pos_horizon = repeat(cond_pos, 'b T1 -> b T1 T2',  T2=block_size)
+            attn = torch.logical_and(attn, ~cond_pos_horizon)
+            
+            cond_pos = repeat(cond_pos, 'b T2 -> b T1 T2',  T1=block_size)
+            attn = torch.logical_or(attn, cond_pos)
+        
+        if self.opt.trans == 'official':
+            attn = torch.repeat_interleave(attn, self.num_heads, dim=0)
+        elif self.opt.trans == 't2mgpt':
+            attn = repeat(attn, 'b T1 T2 -> b h T1 T2',  h=self.num_heads)
+        self.attn = attn
+
+        output = self.seqTransEncoder(xseq, mask=~attn) #(seqlen, b, e)
+        ################################################################
+        
+        
         logits = self.output_process(output) #(seqlen, b, e) -> (b, ntoken, seqlen)
         return logits
 
@@ -261,6 +293,26 @@ class MaskTransformer(nn.Module):
                          dim=-1).long()
         ids = torch.where(non_pad_mask, ids, self.pad_id)
         ids.scatter_(-1, m_lens[..., None], self.end_id)
+
+        # 1. rand con
+        import random
+        rate_cond = .5 # probability of how often cond occur
+        max_cond = .5 # proportion of number of max condition occur
+        occure_r = random.random()
+        cond_r = random.random() * max_cond
+        r = cond_r if occure_r<rate_cond else 0
+        cond_pos = torch.empty_like(ids, dtype=torch.float, device=ids.device).uniform_(0, 1) < r
+        # print(cond_pos[0].sum()/cond_pos[0].shape[0])
+        cond_idx = ids.clone()
+        with_end_mask = lengths_to_mask(m_lens+1, ntokens + 1) #(b, n)
+        cond_idx[torch.logical_or(~cond_pos, ~with_end_mask)] = self.pad_id
+        
+        # 2. end con
+        cond_idx = torch.where(ids==self.end_id, self.end_id, self.pad_id)
+        
+        # 3. GPT
+        # cond_idx = None
+
 
         force_mask = False
         if self.cond_mode == 'text':
@@ -291,15 +343,14 @@ class MaskTransformer(nn.Module):
 
         # Note this is our training target, not input
         labels = ids #torch.where(mask, ids, self.mask_id)
-        x_ids = ids[:, :-1].clone()
+        x_ids = ids.clone()
 
         mask_rid = torch.bernoulli(np.random.rand(1)[0]*.5 * torch.ones(x_ids.shape, device=x_ids.device)) > 0
         rand_id = torch.randint_like(x_ids, high=self.opt.num_tokens)
-        before_end_mask = lengths_to_mask(m_lens, ntokens)
+        before_end_mask = lengths_to_mask(m_lens, ntokens+1)
         x_ids = torch.where(mask_rid*before_end_mask, rand_id, x_ids)
         
-        logits = self.trans_forward(x_ids, cond_vector, None, force_mask)
-
+        logits = self.trans_forward(x_ids, cond_vector, None, force_mask, cond_idx=cond_idx)[..., :-1]
         non_pad_mask_with_end = lengths_to_mask(m_lens+1, ntokens + 1)
         weigths = non_pad_mask_with_end / (non_pad_mask_with_end.sum(-1).unsqueeze(-1) * non_pad_mask_with_end.shape[0])
         logits_masked = logits.permute(0,2,1)[non_pad_mask_with_end]
@@ -317,17 +368,18 @@ class MaskTransformer(nn.Module):
                                 cond_vector,
                                 padding_mask,
                                 cond_scale=3,
-                                force_mask=False):
+                                force_mask=False,
+                                cond_idx=None):
         # bs = motion_ids.shape[0]
         # if cond_scale == 1:
         if force_mask:
-            return self.trans_forward(motion_ids, cond_vector, padding_mask, force_mask=True)
+            return self.trans_forward(motion_ids, cond_vector, padding_mask, force_mask=True, cond_idx=cond_idx)
 
-        logits = self.trans_forward(motion_ids, cond_vector, padding_mask)
+        logits = self.trans_forward(motion_ids, cond_vector, padding_mask, cond_idx=cond_idx)
         if cond_scale == 1:
             return logits
 
-        aux_logits = self.trans_forward(motion_ids, cond_vector, padding_mask, force_mask=True)
+        aux_logits = self.trans_forward(motion_ids, cond_vector, padding_mask, force_mask=True, cond_idx=cond_idx)
 
         scaled_logits = aux_logits + (logits - aux_logits) * cond_scale
         return scaled_logits
@@ -352,43 +404,48 @@ class MaskTransformer(nn.Module):
             cond_vector = self.encode_text(conds)
         is_softmax = True
         seq_len = 49 #max(m_lens)
+        GT_LEN = True
+
+        idx = torch.ones((m_lens.shape[0], seq_len+1), device=m_lens.device) * self.pad_id
+        if GT_LEN:
+            idx = idx.scatter(-1, m_lens[..., None], self.end_id)
+        idx = idx.long()
         for k in range(seq_len):
-            if k == 0:
-                idx_rm_end = []
+            if GT_LEN:
+                cond_idx = torch.where(idx==self.end_id, self.end_id, self.pad_id)
             else:
-                idx_rm_end = xs.clone()
-            logits = self.forward_with_cond_scale(idx_rm_end, cond_vector=cond_vector,
+                cond_idx = None
+            logits = self.forward_with_cond_scale(idx, cond_vector=cond_vector,
                                                   padding_mask=None,
                                                   cond_scale=cond_scale,
-                                                  force_mask=force_mask)
+                                                  force_mask=force_mask,
+                                                  cond_idx=cond_idx)
             # logits = top_k(logits[..., -1], topk_filter_thres, dim=-1)
-            logits = logits[..., -1]
-            # logits = logits[..., :-1] # don't predict end token
+            logits = logits[..., k]
+            if GT_LEN:
+                logits = logits[..., :-1] # don't predict end token
             if True:
                 probs = F.softmax(logits, dim=1)
                 dist = Categorical(probs)
-                idx = dist.sample()
-                idx = idx.unsqueeze(-1)
+                current_idx = dist.sample()
+                current_idx = current_idx.unsqueeze(-1)
+                idx[:, k:k+1] = current_idx
+                if GT_LEN:
+                    idx = idx.scatter(-1, m_lens[..., None], self.end_id)
             else:
                 idx = gumbel_sample(logits, temperature=temperature, dim=-1)
                 idx.unsqueeze_(-1)
-            # append to the sequence and continue
-            if k == 0:
-                xs = idx
-            else:
-                xs = torch.cat((xs, idx), dim=-1)
-        
-        return xs
+        return idx
 
     def pad_when_end(self, xs):
         # prevent case that length is 0 by move end_id to the second index and fill up "0" in the first index
-        pred_end_at_first = xs[:, 0] == self.end_id
+        pred_end_at_first = xs[:, 0] >= self.end_id
         xs[:, 0][pred_end_at_first] = 0
         xs[:, 1][pred_end_at_first] = self.end_id
         
         pred_len = (torch.ones(xs.shape[0], device=xs.device) * (xs.shape[1] + 1)).long()
         # From https://discuss.pytorch.org/t/first-nonzero-index/24769/3
-        mask_max_values, max_indices = torch.max(xs == self.end_id, dim=1)
+        mask_max_values, max_indices = torch.max(xs >= self.end_id, dim=1)
         max_indices[~mask_max_values] = -1
         pred_len[max_indices>=0] = max_indices[max_indices>=0]
         motion_mask = lengths_to_mask(pred_len, xs.shape[1])
@@ -405,6 +462,45 @@ class MaskTransformer(nn.Module):
     #     xs = xs * motion_mask + -1 * ~motion_mask
     #     return xs
 
+    @torch.no_grad()
+    @eval_decorator
+    def edit2(self,
+             texts,
+             cond_tokens,
+             ):
+
+        device = next(self.parameters()).device
+        seq_len = cond_tokens.shape[1]
+
+        with torch.no_grad():
+            cond_vector = self.encode_text(texts)
+
+        seq_len = 49 #max(m_lens)
+        GT_LEN = False
+
+        idx = cond_tokens.clone()
+        cond_idx = cond_tokens.clone()
+        cond_pos = cond_idx!=self.pad_id
+        for k in range(seq_len):
+            logits = self.forward_with_cond_scale(idx, cond_vector=cond_vector,
+                                                  padding_mask=None,
+                                                  cond_scale=4,
+                                                  force_mask=False,
+                                                  cond_idx=cond_idx)
+            # logits = top_k(logits[..., -1], topk_filter_thres, dim=-1)
+            logits = logits[..., k]
+            logits = logits[..., :-1] # don't predict end token
+            if True:
+                probs = F.softmax(logits, dim=1)
+                dist = Categorical(probs)
+                current_idx = dist.sample()
+                current_idx = current_idx.unsqueeze(-1)
+                idx[:, k:k+1] = current_idx
+                idx[cond_pos] = cond_idx[cond_pos]
+            else:
+                idx = gumbel_sample(logits, temperature=temperature, dim=-1)
+                idx.unsqueeze_(-1)
+        return idx
 
 
     @torch.no_grad()
