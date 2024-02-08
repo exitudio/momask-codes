@@ -172,10 +172,10 @@ class MaskTransformerTrainer:
             self.logger.add_scalar('Val/loss', np.mean(val_loss), epoch)
             self.logger.add_scalar('Val/acc', np.mean(val_acc), epoch)
 
-            if np.mean(val_acc) > best_acc:
-                print(f"Improved accuracy from {best_acc:.02f} to {np.mean(val_acc)}!!!")
-                self.save(pjoin(self.opt.model_dir, 'net_best_acc.tar'), epoch, it)
-                best_acc = np.mean(val_acc)
+            # if np.mean(val_acc) > best_acc:
+            #     print(f"Improved accuracy from {best_acc:.02f} to {np.mean(val_acc)}!!!")
+            #     self.save(pjoin(self.opt.model_dir, 'net_best_acc.tar'), epoch, it)
+            #     best_acc = np.mean(val_acc)
 
             if epoch%50 == 0 or epoch == self.opt.max_epoch:
                 best_fid, best_div, best_top1, best_top2, best_top3, best_matching, writer = evaluation_mask_transformer(
