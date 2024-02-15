@@ -262,7 +262,7 @@ class ResidualTransformerTrainer:
             print('Resume wo optimizer')
         return checkpoint['ep'], checkpoint['total_it']
 
-    def train(self, train_loader, val_loader, eval_val_loader, eval_wrapper, plot_eval):
+    def train(self, train_loader, val_loader, eval_val_loader, eval_wrapper, plot_eval, t2m_transformer):
         self.res_transformer.to(self.device)
         self.vq_model.to(self.device)
 
@@ -290,7 +290,8 @@ class ResidualTransformerTrainer:
             best_fid=100, best_div=100,
             best_top1=0, best_top2=0, best_top3=0,
             best_matching=100, eval_wrapper=eval_wrapper,
-            plot_func=plot_eval, save_ckpt=False, save_anim=False
+            plot_func=plot_eval, save_ckpt=False, save_anim=False,
+            t2m_transformer=t2m_transformer
         )
         best_loss = 100
         best_acc = 0
@@ -352,9 +353,11 @@ class ResidualTransformerTrainer:
                 # self.save(pjoin(self.opt.model_dir, 'net_best_loss.tar'), epoch, it)
                 best_acc = np.mean(val_acc)
 
-            best_fid, best_div, best_top1, best_top2, best_top3, best_matching, writer = evaluation_res_transformer(
-                self.opt.save_root, eval_val_loader, self.res_transformer, self.vq_model, self.logger, epoch, best_fid=best_fid,
-                best_div=best_div, best_top1=best_top1, best_top2=best_top2, best_top3=best_top3,
-                best_matching=best_matching, eval_wrapper=eval_wrapper,
-                plot_func=plot_eval, save_ckpt=True, save_anim=(epoch%self.opt.eval_every_e==0)
+            if epoch > 200:
+                best_fid, best_div, best_top1, best_top2, best_top3, best_matching, writer = evaluation_res_transformer(
+                    self.opt.save_root, eval_val_loader, self.res_transformer, self.vq_model, self.logger, epoch, best_fid=best_fid,
+                    best_div=best_div, best_top1=best_top1, best_top2=best_top2, best_top3=best_top3,
+                    best_matching=best_matching, eval_wrapper=eval_wrapper,
+                    plot_func=plot_eval, save_ckpt=True, save_anim=(epoch%self.opt.eval_every_e==0),
+                    t2m_transformer=t2m_transformer
             )

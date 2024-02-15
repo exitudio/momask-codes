@@ -5,7 +5,7 @@ import numpy as np
 from torch.utils.data import DataLoader
 from os.path import join as pjoin
 
-from models.mask_transformer.transformer import ResidualTransformer
+from models.mask_transformer.transformer import MaskTransformer, ResidualTransformer
 from models.mask_transformer.transformer_trainer import ResidualTransformerTrainer
 from models.vq.model import RVQVAE
 
@@ -31,10 +31,10 @@ def plot_t2m(data, save_dir, captions, m_lengths):
         joint = recover_from_ric(torch.from_numpy(joint_data).float(), opt.joints_num).numpy()
         save_path = pjoin(save_dir, '%02d.mp4'%i)
         # print(joint.shape)
-        plot_3d_motion(save_path, kinematic_chain, joint, title=caption, fps=20)
+        # plot_3d_motion(save_path, kinematic_chain, joint, title=caption, fps=20)
 
 def load_vq_model():
-    opt_path = pjoin(opt.checkpoints_dir, opt.dataset_name, opt.vq_name, 'opt.txt')
+    opt_path = pjoin('./log/vq', opt.dataset_name, opt.vq_name, 'opt.txt')
     vq_opt = get_opt(opt_path, opt.device)
     vq_model = RVQVAE(vq_opt,
                 dim_pose,
@@ -56,6 +56,28 @@ def load_vq_model():
     vq_model.to(opt.device)
     return vq_model, vq_opt
 
+def load_trans_model(model_opt, which_model):
+    t2m_transformer = MaskTransformer(code_dim=model_opt.code_dim,
+                                      cond_mode='text',
+                                      latent_dim=model_opt.latent_dim,
+                                      ff_size=model_opt.ff_size,
+                                      num_layers=model_opt.n_layers,
+                                      num_heads=model_opt.n_heads,
+                                      dropout=model_opt.dropout,
+                                      clip_dim=512,
+                                      cond_drop_prob=model_opt.cond_drop_prob,
+                                      clip_version=clip_version,
+                                      opt=model_opt)
+    ckpt = torch.load(pjoin(model_opt.checkpoints_dir, model_opt.dataset_name, model_opt.name, 'model', which_model),
+                      map_location=opt.device)
+    model_key = 't2m_transformer' if 't2m_transformer' in ckpt else 'trans'
+    # print(ckpt.keys())
+    missing_keys, unexpected_keys = t2m_transformer.load_state_dict(ckpt[model_key], strict=False)
+    assert len(unexpected_keys) == 0
+    assert all([k.startswith('clip_model.') for k in missing_keys])
+    print(f'Loading Mask Transformer {opt.name} from epoch {ckpt["ep"]}!')
+    return t2m_transformer
+
 if __name__ == '__main__':
     parser = TrainT2MOptions()
     opt = parser.parse()
@@ -65,6 +87,8 @@ if __name__ == '__main__':
     torch.autograd.set_detect_anomaly(True)
 
     opt.save_root = pjoin(opt.checkpoints_dir, opt.dataset_name, opt.name)
+    from exit.utils import init_save_folder
+    init_save_folder(opt.save_root)
     opt.model_dir = pjoin(opt.save_root, 'model')
     # opt.meta_dir = pjoin(opt.save_root, 'meta')
     opt.eval_dir = pjoin(opt.save_root, 'animation')
@@ -149,8 +173,8 @@ if __name__ == '__main__':
 
     print('Total parameters of all models: {:.2f}M'.format(all_params / 1000_000))
 
-    mean = np.load(pjoin(opt.checkpoints_dir, opt.dataset_name, opt.vq_name, 'meta', 'mean.npy'))
-    std = np.load(pjoin(opt.checkpoints_dir, opt.dataset_name, opt.vq_name, 'meta', 'std.npy'))
+    mean = np.load(pjoin('./log/vq', opt.dataset_name, opt.vq_name, 'meta', 'mean.npy'))
+    std = np.load(pjoin('./log/vq', opt.dataset_name, opt.vq_name, 'meta', 'std.npy'))
 
     train_split_file = pjoin(opt.data_root, 'train.txt')
     val_split_file = pjoin(opt.data_root, 'val.txt')
@@ -168,4 +192,16 @@ if __name__ == '__main__':
 
     trainer = ResidualTransformerTrainer(opt, res_transformer, vq_model)
 
-    trainer.train(train_loader, val_loader, eval_val_loader, eval_wrapper=eval_wrapper, plot_eval=plot_t2m)
+    ### Add t2m_transformer ###
+    root_dir = pjoin('./log/t2m', opt.dataset_name, opt.trans)
+    model_opt_path = pjoin(root_dir, 'opt.txt')
+    model_opt = get_opt(model_opt_path, device=opt.device)
+    model_opt.num_tokens = vq_opt.nb_code
+    model_opt.num_quantizers = vq_opt.num_quantizers
+    model_opt.code_dim = vq_opt.code_dim
+    t2m_transformer = load_trans_model(model_opt, 'net_best_fid.tar')
+    t2m_transformer.eval()
+    t2m_transformer.to(opt.device)
+    ###############################
+
+    trainer.train(train_loader, val_loader, eval_val_loader, eval_wrapper=eval_wrapper, plot_eval=plot_t2m, t2m_transformer=t2m_transformer)
