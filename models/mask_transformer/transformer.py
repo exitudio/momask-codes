@@ -227,7 +227,7 @@ class MaskTransformer(nn.Module):
         :return:
             -logits: (b, num_token, seqlen)
         '''
-        if self.training or force_mask==False:
+        if self.training or force_mask==True:
             cond = self.mask_cond(cond, force_mask=False)
         else:
             cond1 = self.mask_cond(cond, force_mask=False)
@@ -370,11 +370,14 @@ class MaskTransformer(nn.Module):
                                 cond_vector,
                                 padding_mask,
                                 cond_scale=3,
+                                force_mask=False,
                                 cond_idx=None):
 
         # aux_logits = self.trans_forward(motion_ids, cond_vector, padding_mask, force_mask=True, cond_idx=cond_idx)
 
-        logits = self.trans_forward(motion_ids, cond_vector, padding_mask, force_mask=True, cond_idx=cond_idx)
+        logits = self.trans_forward(motion_ids, cond_vector, padding_mask, force_mask=force_mask, cond_idx=cond_idx)
+        if force_mask:
+            return logits
         logits, aux_logits = logits[:int(logits.shape[0]/2)], logits[int(logits.shape[0]/2):]
         scaled_logits = aux_logits + (logits - aux_logits) * cond_scale
         return scaled_logits
@@ -441,6 +444,9 @@ class MaskTransformer(nn.Module):
             current_probs = torch.gather(probs, 1, current_idx)
             probs_all.append(current_probs)
             idx[:, k:k+1] = current_idx
+            # if cond_idx is not None:
+            #     cons_pos = cond_idx != self.pad_id
+            #     idx[cons_pos] = cond_idx[cons_pos]
         return idx, torch.cat(probs_all, dim=1)
 
     def pad_after_end(self, xs):
@@ -488,6 +494,7 @@ class MaskTransformer(nn.Module):
     def edit2(self,
              texts,
              cond_tokens,
+             force_mask=False,
              ):
 
         device = next(self.parameters()).device
@@ -506,7 +513,7 @@ class MaskTransformer(nn.Module):
             logits = self.forward_with_cond_scale(idx, cond_vector=cond_vector,
                                                   padding_mask=None,
                                                   cond_scale=4,
-                                                  force_mask=False,
+                                                  force_mask=force_mask,
                                                   cond_idx=cond_idx)
             # logits = top_k(logits[..., -1], topk_filter_thres, dim=-1)
             logits = logits[..., k]
@@ -991,6 +998,7 @@ class ResidualTransformer(nn.Module):
                  topk_filter_thres=0.9,
                  cond_scale=2,
                  num_res_layers=-1, # If it's -1, use all.
+                 force_mask=False
                  ):
 
         # print(self.opt.num_quantizers)
@@ -1032,7 +1040,7 @@ class ResidualTransformer(nn.Module):
             gathered_ids = repeat(motion_ids, 'b n -> b n d', d=token_embed.shape[-1])
             history_sum += token_embed.gather(1, gathered_ids)
 
-            logits = self.forward_with_cond_scale(history_sum, i, cond_vector, padding_mask, cond_scale=cond_scale)
+            logits = self.forward_with_cond_scale(history_sum, i, cond_vector, padding_mask, cond_scale=cond_scale, force_mask=force_mask)
             # logits = self.trans_forward(history_sum, qids, cond_vector, padding_mask)
 
             logits = logits.permute(0, 2, 1)  # (b, seqlen, ntoken)
