@@ -118,6 +118,7 @@ if __name__ == '__main__':
     model_opt.code_dim = vq_opt.code_dim
 
     res_opt_path = pjoin('checkpoints', opt.dataset_name, opt.res_name, 'opt.txt')
+    # res_opt_path = pjoin('log/res', opt.dataset_name, opt.res_name, 'opt.txt')
     res_opt = get_opt(res_opt_path, device=opt.device)
     res_model = load_res_model(res_opt)
 
@@ -159,12 +160,13 @@ if __name__ == '__main__':
         repeat_time = 20
         for i in range(repeat_time):
             with torch.no_grad():
-                best_fid, best_div, Rprecision, best_matching, best_mm = \
+                best_fid, best_div, Rprecision, best_matching, best_mm, msg = \
                     eval_t2m.evaluation_mask_transformer_test_plus_res(eval_val_loader, vq_model, res_model, t2m_transformer,
                                                                        i, eval_wrapper=eval_wrapper,
                                                          time_steps=opt.time_steps, cond_scale=opt.cond_scale,
                                                          temperature=opt.temperature, topkr=opt.topkr,
                                                                        force_mask=opt.force_mask, cal_mm=True)
+                print(msg, file=f, flush=True)
             fid.append(best_fid)
             div.append(best_div)
             top1.append(Rprecision[0])

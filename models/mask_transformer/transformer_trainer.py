@@ -15,12 +15,15 @@ def def_value():
     return 0.0
 
 class MaskTransformerTrainer:
-    def __init__(self, args, t2m_transformer, vq_model):
+    def __init__(self, args, t2m_transformer, vq_model, res_model=None):
         self.opt = args
         self.t2m_transformer = t2m_transformer
         self.vq_model = vq_model
+        self.res_model = res_model
         self.device = args.device
         self.vq_model.eval()
+        if res_model:
+            self.res_model.eval()
 
         if args.is_train:
             self.logger = SummaryWriter(args.log_dir)
@@ -95,6 +98,8 @@ class MaskTransformerTrainer:
 
     def train(self, train_loader, val_loader, eval_val_loader, eval_wrapper, plot_eval):
         self.t2m_transformer.to(self.device)
+        if self.res_model:
+            self.res_model.to(self.device)
         self.vq_model.to(self.device)
 
         self.opt_t2m_transformer = optim.AdamW(self.t2m_transformer.parameters(), betas=(0.9, 0.99), lr=self.opt.lr, weight_decay=1e-5)
@@ -182,7 +187,8 @@ class MaskTransformerTrainer:
                     self.opt.save_root, eval_val_loader, self.t2m_transformer, self.vq_model, self.logger, epoch, best_fid=best_fid,
                     best_div=best_div, best_top1=best_top1, best_top2=best_top2, best_top3=best_top3,
                     best_matching=best_matching, eval_wrapper=eval_wrapper,
-                    plot_func=plot_eval, save_ckpt=True, save_anim=(epoch%self.opt.eval_every_e==0)
+                    plot_func=plot_eval, save_ckpt=True, save_anim=(epoch%self.opt.eval_every_e==0),
+                    res_model=self.res_model
                 )
 
 

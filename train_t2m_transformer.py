@@ -5,7 +5,7 @@ import numpy as np
 from torch.utils.data import DataLoader
 from os.path import join as pjoin
 
-from models.mask_transformer.transformer import MaskTransformer
+from models.mask_transformer.transformer import MaskTransformer, ResidualTransformer
 from models.mask_transformer.transformer_trainer import MaskTransformerTrainer
 from models.vq.model import RVQVAE
 
@@ -54,6 +54,32 @@ def load_vq_model():
     vq_model.load_state_dict(ckpt[model_key])
     print(f'Loading VQ Model {opt.vq_name}')
     return vq_model, vq_opt
+
+def load_res_model(res_opt):
+    res_opt.num_quantizers = vq_opt.num_quantizers
+    res_opt.num_tokens = vq_opt.nb_code
+    res_transformer = ResidualTransformer(code_dim=vq_opt.code_dim,
+                                            cond_mode='text',
+                                            latent_dim=res_opt.latent_dim,
+                                            ff_size=res_opt.ff_size,
+                                            num_layers=res_opt.n_layers,
+                                            num_heads=res_opt.n_heads,
+                                            dropout=res_opt.dropout,
+                                            clip_dim=512,
+                                            shared_codebook=vq_opt.shared_codebook,
+                                            cond_drop_prob=res_opt.cond_drop_prob,
+                                            # codebook=vq_model.quantizer.codebooks[0] if opt.fix_token_emb else None,
+                                            share_weight=res_opt.share_weight,
+                                            clip_version=clip_version,
+                                            opt=res_opt)
+
+    ckpt = torch.load(pjoin(res_opt.checkpoints_dir, res_opt.dataset_name, res_opt.name, 'model', 'net_best_fid.tar'),
+                      map_location=opt.device)
+    missing_keys, unexpected_keys = res_transformer.load_state_dict(ckpt['res_transformer'], strict=False)
+    assert len(unexpected_keys) == 0
+    assert all([k.startswith('clip_model.') for k in missing_keys])
+    print(f'Loading Residual Transformer {res_opt.name} from epoch {ckpt["ep"]}!')
+    return res_transformer
 
 if __name__ == '__main__':
     parser = TrainT2MOptions()
@@ -150,6 +176,9 @@ if __name__ == '__main__':
     wrapper_opt = get_opt(dataset_opt_path, torch.device('cuda'))
     eval_wrapper = EvaluatorModelWrapper(wrapper_opt)
 
-    trainer = MaskTransformerTrainer(opt, t2m_transformer, vq_model)
+    
+    # res_opt = get_opt('/home/epinyoan/git/momask-codes/checkpoints/t2m/tres_nlayer8_ld384_ff1024_rvq6ns_cdp0.2_sw/opt.txt', device=opt.device)
+    # res_model = load_res_model(res_opt)
+    trainer = MaskTransformerTrainer(opt, t2m_transformer, vq_model) #, res_model
 
     trainer.train(train_loader, val_loader, eval_val_loader, eval_wrapper=eval_wrapper, plot_eval=plot_t2m)
