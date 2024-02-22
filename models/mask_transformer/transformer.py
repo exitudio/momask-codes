@@ -227,8 +227,15 @@ class MaskTransformer(nn.Module):
         :return:
             -logits: (b, num_token, seqlen)
         '''
-
-        cond = self.mask_cond(cond, force_mask=force_mask)
+        if self.training or force_mask==False:
+            cond = self.mask_cond(cond, force_mask=False)
+        else:
+            cond1 = self.mask_cond(cond, force_mask=False)
+            cond2 = self.mask_cond(cond, force_mask=True)
+            cond = torch.cat([cond1, cond2], dim=0)
+            motion_ids = repeat(motion_ids, 'b t -> (repeat b) t', repeat=2)
+            if cond_idx is not None:
+                cond_idx = repeat(cond_idx, 'b t -> (repeat b) t', repeat=2)
         cond = self.cond_emb(cond).unsqueeze(0) #(1, b, latent_dim)
         if len(motion_ids) > 0:
             # print(motion_ids.shape)
@@ -254,7 +261,7 @@ class MaskTransformer(nn.Module):
 
         if cond_idx is not None:
             cond_pos = cond_idx != self.pad_id
-            cond_pos = torch.cat([torch.zeros_like(cond_pos[:, 0:1]), cond_pos], dim=1) #(b, seqlen+1)
+            cond_pos = torch.cat([torch.ones_like(cond_pos[:, 0:1]), cond_pos], dim=1) #(b, seqlen+1)
             
             cond_pos_horizon = repeat(cond_pos, 'b T1 -> b T1 T2',  T2=block_size)
             attn = torch.logical_and(attn, ~cond_pos_horizon)
@@ -295,20 +302,15 @@ class MaskTransformer(nn.Module):
         ids.scatter_(-1, m_lens[..., None], self.end_id)
 
         # 1. rand con
-        import random
-        rate_cond = .5 # probability of how often cond occur
-        max_cond = .5 # proportion of number of max condition occur
-        occure_r = random.random()
-        cond_r = random.random() * max_cond
-        r = cond_r if occure_r<rate_cond else 0
-        cond_pos = torch.empty_like(ids, dtype=torch.float, device=ids.device).uniform_(0, 1) < r
-        # print(cond_pos[0].sum()/cond_pos[0].shape[0])
+        cond_pos = torch.empty_like(ids, dtype=torch.float, device=ids.device).uniform_(0, 1) < .5
+        cond_pos_idx = torch.empty( ids.shape[0] , dtype=torch.float, device=ids.device).uniform_(0, 1) <.5
+        cond_pos[~cond_pos_idx] = False
         cond_idx = ids.clone()
         with_end_mask = lengths_to_mask(m_lens+1, ntokens + 1) #(b, n)
         cond_idx[torch.logical_or(~cond_pos, ~with_end_mask)] = self.pad_id
         
         # 2. end con
-        cond_idx = torch.where(ids==self.end_id, self.end_id, self.pad_id)
+        # cond_idx = torch.where(ids==self.end_id, self.end_id, self.pad_id)
         
         # 3. GPT
         # cond_idx = None
@@ -368,19 +370,12 @@ class MaskTransformer(nn.Module):
                                 cond_vector,
                                 padding_mask,
                                 cond_scale=3,
-                                force_mask=False,
                                 cond_idx=None):
-        # bs = motion_ids.shape[0]
-        # if cond_scale == 1:
-        if force_mask:
-            return self.trans_forward(motion_ids, cond_vector, padding_mask, force_mask=True, cond_idx=cond_idx)
 
-        logits = self.trans_forward(motion_ids, cond_vector, padding_mask, cond_idx=cond_idx)
-        if cond_scale == 1:
-            return logits
+        # aux_logits = self.trans_forward(motion_ids, cond_vector, padding_mask, force_mask=True, cond_idx=cond_idx)
 
-        aux_logits = self.trans_forward(motion_ids, cond_vector, padding_mask, force_mask=True, cond_idx=cond_idx)
-
+        logits = self.trans_forward(motion_ids, cond_vector, padding_mask, force_mask=True, cond_idx=cond_idx)
+        logits, aux_logits = logits[:int(logits.shape[0]/2)], logits[int(logits.shape[0]/2):]
         scaled_logits = aux_logits + (logits - aux_logits) * cond_scale
         return scaled_logits
 
@@ -398,44 +393,70 @@ class MaskTransformer(nn.Module):
                  ):
         # print(self.opt.num_quantizers)
         # assert len(timesteps) >= len(cond_scales) == self.opt.num_quantizers
-
-
         with torch.no_grad():
             cond_vector = self.encode_text(conds)
         is_softmax = True
         seq_len = 49 #max(m_lens)
-        GT_LEN = True
 
-        idx = torch.ones((m_lens.shape[0], seq_len+1), device=m_lens.device) * self.pad_id
-        if GT_LEN:
-            idx = idx.scatter(-1, m_lens[..., None], self.end_id)
-        idx = idx.long()
+
+        # padding_mask = ~lengths_to_mask(m_lens, seq_len+1)
+        # ids = torch.ones_like(padding_mask) * self.pad_id
+        # ids = ids.scatter(-1, m_lens[..., None], self.end_id)
+        # scores = torch.where(padding_mask, 1e5, 0.)
+        ids = torch.ones((len(conds), seq_len+1), dtype=torch.long, device=m_lens.device) * self.pad_id
+        ids, scores = self.gen_one(ids, cond_vector, seq_len, cond_idx=None, cond_scale=cond_scale)
+        ids, pred_len = self.pad_after_end(ids)
+        padding_mask = ~lengths_to_mask(pred_len, seq_len+1)
+        ids = ids.scatter(-1, pred_len[..., None], self.end_id)
+        scores = torch.where(padding_mask, 1e5, 0.)
+        
+        num_token_masked = torch.round(.5 * pred_len).clamp(min=1)
+        sorted_indices = scores.argsort( dim=1)
+        ranks = sorted_indices.argsort(dim=1)  # (b, k), rank[i, j] = the rank (0: lowest) of scores[i, j] on dim=1
+        is_mask = (ranks < num_token_masked.unsqueeze(-1))
+        cons_pos = ((~is_mask * ~padding_mask) + (ids==self.end_id)) > 0
+        cond_idx = torch.where(cons_pos, ids, self.pad_id).clone()
+
+        ids, scores = self.gen_one(ids, cond_vector, seq_len, cond_idx, cond_scale=cond_scale)
+        ids[cons_pos] = cond_idx[cons_pos]
+
+        # scores = torch.cat([scores, torch.ones(scores.shape[0], 1, device=ids.device)*1e5], dim=1)
+        # scores = scores.masked_fill(~is_mask, 1e5)
+        return ids
+    
+    def gen_one(self, idx, cond_vector, seq_len, cond_idx, cond_scale):
+        probs_all = []
+        idx = idx.clone()
         for k in range(seq_len):
-            if GT_LEN:
-                cond_idx = torch.where(idx==self.end_id, self.end_id, self.pad_id)
-            else:
-                cond_idx = None
             logits = self.forward_with_cond_scale(idx, cond_vector=cond_vector,
-                                                  padding_mask=None,
-                                                  cond_scale=cond_scale,
-                                                  force_mask=force_mask,
-                                                  cond_idx=cond_idx)
+                                                    padding_mask=None,
+                                                    cond_scale=cond_scale,
+                                                    cond_idx=cond_idx)
             # logits = top_k(logits[..., -1], topk_filter_thres, dim=-1)
             logits = logits[..., k]
-            if GT_LEN:
-                logits = logits[..., :-1] # don't predict end token
-            if True:
-                probs = F.softmax(logits, dim=1)
-                dist = Categorical(probs)
-                current_idx = dist.sample()
-                current_idx = current_idx.unsqueeze(-1)
-                idx[:, k:k+1] = current_idx
-                if GT_LEN:
-                    idx = idx.scatter(-1, m_lens[..., None], self.end_id)
-            else:
-                idx = gumbel_sample(logits, temperature=temperature, dim=-1)
-                idx.unsqueeze_(-1)
-        return idx
+            probs = F.softmax(logits, dim=1)
+            dist = Categorical(probs)
+            current_idx = dist.sample()
+            current_idx = current_idx.unsqueeze(-1)
+            current_probs = torch.gather(probs, 1, current_idx)
+            probs_all.append(current_probs)
+            idx[:, k:k+1] = current_idx
+        return idx, torch.cat(probs_all, dim=1)
+
+    def pad_after_end(self, xs):
+        # prevent case that length is 0 by move end_id to the second index and fill up "0" in the first index
+        pred_end_at_first = xs[:, 0] >= self.end_id
+        xs[:, 0][pred_end_at_first] = 0
+        xs[:, 1][pred_end_at_first] = self.end_id
+        
+        pred_len = (torch.ones(xs.shape[0], device=xs.device) * (xs.shape[1] + 1)).long()
+        # From https://discuss.pytorch.org/t/first-nonzero-index/24769/3
+        mask_max_values, max_indices = torch.max(xs >= self.end_id, dim=1)
+        max_indices[~mask_max_values] = -1
+        pred_len[max_indices>=0] = max_indices[max_indices>=0]
+        motion_mask = lengths_to_mask(pred_len+1, xs.shape[1])
+        xs = xs * motion_mask + self.pad_id * ~motion_mask
+        return xs, pred_len
 
     def pad_when_end(self, xs):
         # prevent case that length is 0 by move end_id to the second index and fill up "0" in the first index
