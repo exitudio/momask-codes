@@ -934,7 +934,7 @@ def evaluation_mask_transformer_test_plus_res(val_loader, vq_model, res_model, t
 
     nb_sample = 0
     cal_mm = True
-    is_edit = False
+    edit_task = None # inpainting, outpainting, prefix, suffix
     force_mask = False
     # If true need to add this to trans.generate&res_model.generate "force_mask=force_mask" (dont forget there are 2 places in if else)
     res_cond_scale = 6
@@ -954,7 +954,7 @@ def evaluation_mask_transformer_test_plus_res(val_loader, vq_model, res_model, t
 
         bs, seq = pose.shape[:2]
         # num_joints = 21 if pose.shape[-1] == 251 else 22
-        if is_edit:
+        if edit_task in ['inpainting', 'outpainting']:
             tokens = trans.pad_id * torch.ones((bs, 50), dtype=torch.long).cuda()
             m_token_length = torch.ceil((m_length)/4).int().cpu().numpy()
             m_token_length_init = (m_token_length * .25).astype(int)
@@ -964,23 +964,46 @@ def evaluation_mask_transformer_test_plus_res(val_loader, vq_model, res_model, t
                 l = m_length_init[k]
                 l_token = m_token_length_init[k]
 
-                # # start tokens
-                index_motion, _ = vq_model.encode(pose[k:k+1, :l].cuda())
-                index_motion = index_motion[..., 0]
-                tokens[k,:index_motion.shape[1]] = index_motion[0]
+                if edit_task == 'inpainting':
+                    # # start tokens
+                    index_motion, _ = vq_model.encode(pose[k:k+1, :l].cuda())
+                    index_motion = index_motion[..., 0]
+                    tokens[k,:index_motion.shape[1]] = index_motion[0]
 
-                # # end tokens
-                index_motion, _ = vq_model.encode(pose[k:k+1, m_length[k]-l :m_length[k]].cuda())
-                index_motion = index_motion[..., 0]
-                tokens[k, m_token_length[k]-l_token :m_token_length[k]] = index_motion[0]
+                    # # end tokens
+                    index_motion, _ = vq_model.encode(pose[k:k+1, m_length[k]-l :m_length[k]].cuda())
+                    index_motion = index_motion[..., 0]
+                    tokens[k, m_token_length[k]-l_token :m_token_length[k]] = index_motion[0]
+                elif edit_task == 'outpainting':
+                    # inside tokens
+                    index_motion, _ = vq_model.encode(pose[k:k+1, l:m_length[k]-l].cuda())
+                    index_motion = index_motion[..., 0]
+                    tokens[k, l_token: l_token+index_motion.shape[1]] = index_motion[0]
             tokens = tokens.scatter(-1, torch.from_numpy(m_token_length[..., None]).cuda().long(), trans.end_id)
+
+        if edit_task in ['prefix', 'suffix']:
+            tokens = trans.pad_id * torch.ones((bs, 50), dtype=torch.long).cuda()
+            m_token_length = torch.ceil((m_length)/4).int().cpu().numpy()
+            m_token_length_half = (m_token_length * .5).astype(int)
+            m_length_half = (m_length * .5).int()
+            for k in range(bs):
+                if edit_task == 'prefix':
+                    index_motion, _ = vq_model.encode(pose[k:k+1, :m_length_half[k]].cuda())
+                    index_motion = index_motion[..., 0]
+                    tokens[k, :m_token_length_half[k]] = index_motion[0]
+                elif edit_task == 'suffix':
+                    index_motion, _ = vq_model.encode(pose[k:k+1, m_length_half[k]:m_length[k]].cuda())
+                    index_motion = index_motion[..., 0]
+                    tokens[k, m_token_length[k]-m_token_length_half[k] :m_token_length[k]] = index_motion[0]
+            tokens = tokens.scatter(-1, torch.from_numpy(m_token_length[..., None]).cuda().long(), trans.end_id)
+
 
         # for i in range(mm_batch)
         if i < num_mm_batch:
         # (b, seqlen, c)
             motion_multimodality_batch = []
             for _ in range(30):
-                if is_edit:
+                if edit_task is not None:
                     mids = trans.edit2(clip_text, tokens, force_mask=force_mask)
                 else:
                     mids = trans.generate(clip_text, m_length // 4, time_steps, cond_scale,
@@ -1017,7 +1040,7 @@ def evaluation_mask_transformer_test_plus_res(val_loader, vq_model, res_model, t
             motion_multimodality_batch = torch.cat(motion_multimodality_batch, dim=1) #(bs, 30, d)
             motion_multimodality.append(motion_multimodality_batch)
         else:
-            if is_edit:
+            if edit_task is not None:
                     mids = trans.edit2(clip_text, tokens, force_mask=force_mask)
             else:
                 mids = trans.generate(clip_text, m_length // 4, time_steps, cond_scale,
