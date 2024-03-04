@@ -227,7 +227,7 @@ class MaskTransformer(nn.Module):
         :return:
             -logits: (b, num_token, seqlen)
         '''
-        if self.training or force_mask==True:
+        if self.training or force_mask==False:
             cond = self.mask_cond(cond, force_mask=False)
         else:
             cond1 = self.mask_cond(cond, force_mask=False)
@@ -302,9 +302,14 @@ class MaskTransformer(nn.Module):
         ids.scatter_(-1, m_lens[..., None], self.end_id)
 
         # 1. rand con
-        cond_pos = torch.empty_like(ids, dtype=torch.float, device=ids.device).uniform_(0, 1) < .5
-        cond_pos_idx = torch.empty( ids.shape[0] , dtype=torch.float, device=ids.device).uniform_(0, 1) <.5
-        cond_pos[~cond_pos_idx] = False
+        import random
+        rate_cond = .5 # probability of how often cond occur
+        max_cond = .5 # proportion of number of max condition occur
+        occure_r = random.random()
+        cond_r = random.random() * max_cond
+        r = cond_r if occure_r<rate_cond else 0
+        cond_pos = torch.empty_like(ids, dtype=torch.float, device=ids.device).uniform_(0, 1) < r
+        # print(cond_pos[0].sum()/cond_pos[0].shape[0])
         cond_idx = ids.clone()
         with_end_mask = lengths_to_mask(m_lens+1, ntokens + 1) #(b, n)
         cond_idx[torch.logical_or(~cond_pos, ~with_end_mask)] = self.pad_id
@@ -370,14 +375,11 @@ class MaskTransformer(nn.Module):
                                 cond_vector,
                                 padding_mask,
                                 cond_scale=3,
-                                force_mask=False,
                                 cond_idx=None):
 
         # aux_logits = self.trans_forward(motion_ids, cond_vector, padding_mask, force_mask=True, cond_idx=cond_idx)
 
-        logits = self.trans_forward(motion_ids, cond_vector, padding_mask, force_mask=force_mask, cond_idx=cond_idx)
-        if force_mask:
-            return logits
+        logits = self.trans_forward(motion_ids, cond_vector, padding_mask, force_mask=True, cond_idx=cond_idx)
         logits, aux_logits = logits[:int(logits.shape[0]/2)], logits[int(logits.shape[0]/2):]
         scaled_logits = aux_logits + (logits - aux_logits) * cond_scale
         return scaled_logits
@@ -411,23 +413,25 @@ class MaskTransformer(nn.Module):
         ids, pred_len = self.pad_after_end(ids)
         padding_mask = ~lengths_to_mask(pred_len, seq_len+1)
         ids = ids.scatter(-1, pred_len[..., None], self.end_id)
-        scores = torch.where(padding_mask, 1e5, 0.)
+        # scores = torch.where(padding_mask, 1e5, 0.)
         
-        num_token_masked = torch.round(.5 * pred_len).clamp(min=1)
-        sorted_indices = scores.argsort( dim=1)
-        ranks = sorted_indices.argsort(dim=1)  # (b, k), rank[i, j] = the rank (0: lowest) of scores[i, j] on dim=1
-        is_mask = (ranks < num_token_masked.unsqueeze(-1))
+        # num_token_masked = torch.round(.5 * pred_len).clamp(min=1)
+        # sorted_indices = scores.argsort( dim=1)
+        # ranks = sorted_indices.argsort(dim=1)  # (b, k), rank[i, j] = the rank (0: lowest) of scores[i, j] on dim=1
+        is_mask = torch.ones_like(ids, dtype=torch.bool)
+        is_mask[:, 1::2] = False
+
         cons_pos = ((~is_mask * ~padding_mask) + (ids==self.end_id)) > 0
         cond_idx = torch.where(cons_pos, ids, self.pad_id).clone()
 
-        ids, scores = self.gen_one(ids, cond_vector, seq_len, cond_idx, cond_scale=cond_scale)
+        ids, scores = self.gen_one(ids, cond_vector, seq_len, cond_idx, cond_scale=3, pred_len=False)
         ids[cons_pos] = cond_idx[cons_pos]
 
         # scores = torch.cat([scores, torch.ones(scores.shape[0], 1, device=ids.device)*1e5], dim=1)
         # scores = scores.masked_fill(~is_mask, 1e5)
         return ids
     
-    def gen_one(self, idx, cond_vector, seq_len, cond_idx, cond_scale):
+    def gen_one(self, idx, cond_vector, seq_len, cond_idx, cond_scale, pred_len=True):
         probs_all = []
         idx = idx.clone()
         for k in range(seq_len):
@@ -437,6 +441,8 @@ class MaskTransformer(nn.Module):
                                                     cond_idx=cond_idx)
             # logits = top_k(logits[..., -1], topk_filter_thres, dim=-1)
             logits = logits[..., k]
+            if not pred_len:
+                logits = logits[..., :-1]
             probs = F.softmax(logits, dim=1)
             dist = Categorical(probs)
             current_idx = dist.sample()
@@ -503,7 +509,7 @@ class MaskTransformer(nn.Module):
         with torch.no_grad():
             cond_vector = self.encode_text(texts)
 
-        seq_len = 49 #max(m_lens)
+        # seq_len = 49 #max(m_lens)
         GT_LEN = False
 
         idx = cond_tokens.clone()
@@ -512,7 +518,7 @@ class MaskTransformer(nn.Module):
         for k in range(seq_len):
             logits = self.forward_with_cond_scale(idx, cond_vector=cond_vector,
                                                   padding_mask=None,
-                                                  cond_scale=4,
+                                                  cond_scale=3,
                                                   force_mask=force_mask,
                                                   cond_idx=cond_idx)
             # logits = top_k(logits[..., -1], topk_filter_thres, dim=-1)
