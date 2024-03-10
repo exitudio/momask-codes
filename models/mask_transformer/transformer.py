@@ -218,7 +218,7 @@ class MaskTransformer(nn.Module):
         else:
             return cond
 
-    def trans_forward(self, motion_ids, cond, padding_mask, force_mask=False, cond_idx=None):
+    def trans_forward(self, motion_ids, cond, padding_mask, force_mask=None, cond_idx=None):
         '''
         :param motion_ids: (b, seqlen)
         :padding_mask: (b, seqlen), all pad positions are TRUE else FALSE
@@ -229,6 +229,8 @@ class MaskTransformer(nn.Module):
         '''
         if self.training or force_mask==False:
             cond = self.mask_cond(cond, force_mask=False)
+        elif force_mask:
+            cond = self.mask_cond(cond, force_mask=True)
         else:
             cond1 = self.mask_cond(cond, force_mask=False)
             cond2 = self.mask_cond(cond, force_mask=True)
@@ -375,11 +377,14 @@ class MaskTransformer(nn.Module):
                                 cond_vector,
                                 padding_mask,
                                 cond_scale=3,
+                                force_mask = None,
                                 cond_idx=None):
 
         # aux_logits = self.trans_forward(motion_ids, cond_vector, padding_mask, force_mask=True, cond_idx=cond_idx)
-
-        logits = self.trans_forward(motion_ids, cond_vector, padding_mask, force_mask=True, cond_idx=cond_idx)
+        if force_mask:
+            logits = self.trans_forward(motion_ids, cond_vector, padding_mask, force_mask=True, cond_idx=cond_idx)
+            return logits
+        logits = self.trans_forward(motion_ids, cond_vector, padding_mask, force_mask=force_mask, cond_idx=cond_idx)
         logits, aux_logits = logits[:int(logits.shape[0]/2)], logits[int(logits.shape[0]/2):]
         scaled_logits = aux_logits + (logits - aux_logits) * cond_scale
         return scaled_logits
@@ -500,14 +505,18 @@ class MaskTransformer(nn.Module):
     def edit2(self,
              texts,
              cond_tokens,
-             force_mask=False,
              ):
-
         device = next(self.parameters()).device
         seq_len = cond_tokens.shape[1]
 
-        with torch.no_grad():
-            cond_vector = self.encode_text(texts)
+            
+        if texts is None:
+            cond_vector = torch.zeros((cond_tokens.shape[0], 512)).to(device)
+            force_mask = True
+        else:
+            with torch.no_grad():
+                cond_vector = self.encode_text(texts)
+            force_mask=None,
 
         # seq_len = 49 #max(m_lens)
         GT_LEN = False
